@@ -263,8 +263,6 @@ func parseYarnLockYaml(reader io.ReadCloser) ([]yarnPackage, error) {
 		return nil, fmt.Errorf("failed to unmarshal yarn v2 lockfile: %w", err)
 	}
 
-	var seenPkgs = strset.New()
-
 	pkgs := []yarnPackage{}
 	for key, value := range lockfile {
 		packageName := findPackageName(key)
@@ -273,13 +271,14 @@ func parseYarnLockYaml(reader io.ReadCloser) ([]yarnPackage, error) {
 			continue
 		}
 
-		var pkg = yarnPackage{Name: packageName, Version: value.Version, Resolved: value.Resolution, Integrity: value.Checksum, Dependencies: value.Dependencies}
-		var nameVersion = pkg.Name + "@" + pkg.Version
-
-		if !seenPkgs.Has(nameVersion) {
-			seenPkgs.Add(nameVersion)
-			pkgs = append(pkgs, pkg)
-		}
+		// Different resolutions of the same name and version have distinct package IDs.
+		pkgs = append(pkgs, yarnPackage{
+			Name:         packageName,
+			Version:      value.Version,
+			Resolved:     value.Resolution,
+			Integrity:    value.Checksum,
+			Dependencies: value.Dependencies,
+		})
 	}
 
 	return pkgs, nil

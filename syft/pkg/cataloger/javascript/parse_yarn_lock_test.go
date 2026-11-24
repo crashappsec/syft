@@ -242,6 +242,55 @@ func TestParseYarnBerryWithDuplicates(t *testing.T) {
 	pkgtest.TestFileParser(t, fixture, adapter.parseYarnLock, expectedPkgs, expectedRelationships)
 }
 
+func TestParseYarnBerryPreservesResolutions(t *testing.T) {
+	const npmResolution = "resolve@npm:1.22.8"
+	const patchResolution = "resolve@patch:resolve@npm%3A1.22.8#optional!builtin<compat/resolve>::version=1.22.8&hash=c3c19d"
+
+	const metadata = "__metadata:\n  version: 8\n  cacheKey: 10c0\n\n"
+	const npmEntry = `"resolve@npm:^1.22.0":
+  version: 1.22.8
+  resolution: "` + npmResolution + `"
+  checksum: 10c0/resolvenpm
+
+`
+	const patchEntry = `"resolve@patch:resolve@npm%3A^1.22.0#optional!builtin<compat/resolve>":
+  version: 1.22.8
+  resolution: "` + patchResolution + `"
+  checksum: 10c0/resolvepatch
+
+`
+
+	for _, tt := range []struct {
+		name    string
+		entries string
+	}{
+		{name: "npm first", entries: npmEntry + patchEntry},
+		{name: "patch first", entries: patchEntry + npmEntry},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := file.LocationReadCloser{
+				Location:   file.NewLocation("yarn.lock"),
+				ReadCloser: io.NopCloser(strings.NewReader(metadata + tt.entries)),
+			}
+			adapter := newGenericYarnLockAdapter(CatalogerConfig{})
+			packages, _, err := adapter.parseYarnLock(t.Context(), nil, nil, reader)
+			require.NoError(t, err)
+			require.Len(t, packages, 2)
+			var entries []pkg.YarnLockEntry
+			for _, p := range packages {
+				assert.Equal(t, "pkg:npm/resolve@1.22.8", p.PURL)
+				require.NotEmpty(t, p.ID())
+				entries = append(entries, p.Metadata.(pkg.YarnLockEntry))
+			}
+			assert.NotEqual(t, packages[0].ID(), packages[1].ID())
+			assert.ElementsMatch(t, []pkg.YarnLockEntry{
+				{Resolved: npmResolution, Integrity: "10c0/resolvenpm"},
+				{Resolved: patchResolution, Integrity: "10c0/resolvepatch"},
+			}, entries)
+		})
+	}
+}
+
 func TestParseYarnLock(t *testing.T) {
 	var expectedRelationships []artifact.Relationship
 	fixture := "testdata/yarn/yarn.lock"
