@@ -6,15 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	"github.com/anchore/syft/internal/log"
+	"github.com/anchore/syft/internal/relationship"
 	"github.com/anchore/syft/internal/unknown"
 	"github.com/anchore/syft/syft/artifact"
 	"github.com/anchore/syft/syft/file"
 	"github.com/anchore/syft/syft/pkg"
 	"github.com/anchore/syft/syft/pkg/cataloger/generic"
-	"github.com/anchore/syft/syft/pkg/cataloger/internal/dependency"
 )
 
 // packageLock represents a JavaScript package.lock json file
@@ -41,6 +42,7 @@ type lockPackage struct {
 	Integrity    string             `json:"integrity"`
 	License      packageLockLicense `json:"license"`
 	Dev          bool               `json:"dev"`
+	Link         bool               `json:"link"`
 	Dependencies map[string]string  `json:"dependencies"`
 }
 
@@ -68,6 +70,7 @@ func (a genericPackageLockAdapter) parsePackageLock(ctx context.Context, resolve
 	}
 
 	var pkgs []pkg.Package
+	var relationships []artifact.Relationship
 	dec := json.NewDecoder(reader)
 
 	var lock packageLock
@@ -84,13 +87,12 @@ func (a genericPackageLockAdapter) parsePackageLock(ctx context.Context, resolve
 	}
 
 	if lock.LockfileVersion == 2 || lock.LockfileVersion == 3 {
-		for name, pkgMeta := range lock.Packages {
-			if name == "" {
-				if pkgMeta.Name == "" {
-					continue
-				}
-				name = pkgMeta.Name
+		packagesByPath := make(map[string]pkg.Package, len(lock.Packages))
+		for installPath, pkgMeta := range lock.Packages {
+			if installPath == "" && pkgMeta.Name == "" {
+				continue
 			}
+			name := installPath
 
 			// skip packages that are only present as a dev dependency
 			if !a.cfg.IncludeDevDependencies && pkgMeta.Dev {
@@ -104,12 +106,57 @@ func (a genericPackageLockAdapter) parsePackageLock(ctx context.Context, resolve
 
 			newPkg := newPackageLockV2Package(ctx, a.licenseResolver, resolver, reader.Location, getNameFromPath(name), pkgMeta)
 			pkgs = append(pkgs, newPkg)
+			packagesByPath[installPath] = newPkg
 		}
+		relationships = packageLockRelationships(lock.Packages, packagesByPath)
 	}
 
 	pkg.Sort(pkgs)
 
-	return pkgs, dependency.Resolve(packageLockDependencySpecifier, pkgs), unknown.IfEmptyf(pkgs, "unable to determine packages")
+	return pkgs, relationships, unknown.IfEmptyf(pkgs, "unable to determine packages")
+}
+
+// npm resolves a request against the nearest installed package with that name.
+// Aliases use their installed name in the lockfile paths.
+func packageLockRelationships(entries map[string]lockPackage, packagesByPath map[string]pkg.Package) []artifact.Relationship {
+	var relationships []artifact.Relationship
+	seen := make(map[[2]artifact.ID]bool)
+	for installPath, parent := range packagesByPath {
+		for name := range entries[installPath].Dependencies {
+			childPath, ok := packageLockDependencyPath(entries, installPath, name)
+			if !ok {
+				continue
+			}
+			if entry := entries[childPath]; entry.Link {
+				childPath = path.Clean(entry.Resolved)
+			}
+			child, ok := packagesByPath[childPath]
+			if !ok {
+				continue
+			}
+			key := [2]artifact.ID{child.ID(), parent.ID()}
+			if !seen[key] {
+				seen[key] = true
+				relationships = append(relationships, artifact.Relationship{From: child, To: parent, Type: artifact.DependencyOfRelationship})
+			}
+		}
+	}
+	relationship.Sort(relationships)
+	return relationships
+}
+
+func packageLockDependencyPath(entries map[string]lockPackage, installPath, name string) (string, bool) {
+	for directory := path.Clean(installPath); ; directory = path.Dir(directory) {
+		if path.Base(directory) != "node_modules" {
+			candidate := path.Join(directory, "node_modules", name)
+			if _, ok := entries[candidate]; ok {
+				return candidate, true
+			}
+		}
+		if directory == "." || directory == "/" {
+			return "", false
+		}
+	}
 }
 
 func (a genericPackageLockAdapter) packageLockV1Packages(ctx context.Context, resolver file.Resolver, location file.Location, dependencies map[string]lockDependency) []pkg.Package {
