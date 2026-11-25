@@ -12,7 +12,7 @@
   "lua": ["lua-rock-cataloger", "lua/rockspec/lpeg-1.0.2-1.rockspec"],
   "nix": ["nix-cataloger", "nix/fixture-1"],
   "ocaml": ["opam-cataloger", "ocaml/alcotest.opam"],
-  "perl": ["perl-cpan-meta-cataloger", "perl/identity-positive/META.json"],
+  "perl": ["perl-cpan-meta-cataloger", "./cpan-release"],
   "php": ["php-composer-lock-cataloger", "php/composer.lock"],
   "prolog": ["swipl-pack-cataloger", "swipl/pack.pl"],
   "python": ["python-package-cataloger", "python/pdm-lock/pdm.lock"],
