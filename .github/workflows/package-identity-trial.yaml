@@ -1,0 +1,59 @@
+name: Package identity trial
+
+on:
+  push:
+    branches:
+      - crash/v1.57.2-package-identity
+
+permissions:
+  contents: read
+
+jobs:
+  binary:
+    if: github.repository == 'crashappsec/syft'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build the Linux AMD64 trial binary
+        env:
+          CGO_ENABLED: 0
+          GOARCH: amd64
+          GOOS: linux
+        run: |
+          test -z "$(git status --porcelain)"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          date=$(git show -s --format=%cI HEAD)
+          mkdir -p "$RUNNER_TEMP/trial"
+          go build -trimpath -tags=containers_image_openpgp,exclude_graphdriver_btrfs \
+            -ldflags="-s -w -X main.version=1.57.2-crashoverride.1 -X main.gitCommit=$GITHUB_SHA -X main.buildDate=$date" \
+            -o "$RUNNER_TEMP/trial/syft" ./cmd/syft
+          cd "$RUNNER_TEMP/trial"
+          sha256sum syft | tee syft.sha256
+          go version -m syft > toolchain.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: syft-linux-amd64
+          path: ${{ runner.temp }}/trial
+          if-no-files-found: error
+
+  suites:
+    if: github.repository == 'crashappsec/syft'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          download-test-fixture-cache: true
+          bootstrap-apt-packages: libxml2-utils skopeo
+      - name: Run unit tests
+        run: make unit
+      - name: Run integration tests
+        if: '!cancelled()'
+        run: make integration
