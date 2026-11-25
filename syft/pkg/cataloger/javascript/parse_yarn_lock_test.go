@@ -1153,13 +1153,13 @@ func TestParseYarnV1LockFile_missingValues(t *testing.T) {
 			// a dependency line without a constraint is dropped rather than indexed past its end
 			name:    "dependency without version",
 			content: "# yarn lockfile v1\n\na@1:\n  version \"1\"\n  dependencies:\n    b\n\n",
-			want:    []yarnPackage{{Name: "a", Version: "1", Dependencies: map[string]string{}}},
+			want:    []yarnPackage{{Descriptors: []string{"a@1"}, Name: "a", Version: "1", Dependencies: map[string]string{}}},
 		},
 		{
 			// a field line without a value leaves the field empty
 			name:    "field without value",
 			content: "# yarn lockfile v1\n\na@1:\n  version\n\n",
-			want:    []yarnPackage{{Name: "a", Dependencies: map[string]string{}}},
+			want:    []yarnPackage{{Descriptors: []string{"a@1"}, Name: "a", Dependencies: map[string]string{}}},
 		},
 	}
 	for _, tt := range tests {
