@@ -1,0 +1,12 @@
+{
+  "abstract": "A distribution for the package identity inventory test",
+  "author": ["Syft test fixture"],
+  "dynamic_config": 0,
+  "generated_by": "fixture",
+  "license": ["perl_5"],
+  "meta-spec": {"url": "https://metacpan.org/pod/CPAN::Meta::Spec", "version": 2},
+  "name": "Identity-Test",
+  "prereqs": {},
+  "release_status": "stable",
+  "version": "1.0.0"
+}

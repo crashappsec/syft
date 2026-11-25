@@ -1,0 +1,23 @@
+{
+  "c++": ["conan-cataloger", "cpp/conanlock-v2/conan.lock"],
+  "conda": ["conda-meta-cataloger", "conda/conda-meta-python-c-etc"],
+  "dart": ["dart-pubspec-lock-cataloger", "dart/pubspec_locks/pubspec.lock"],
+  "dotnet": ["dotnet-packages-lock-cataloger", "dotnet/packages.lock.json"],
+  "elixir": ["elixir-mix-lock-cataloger", "elixir/mix.lock"],
+  "erlang": ["erlang-rebar-lock-cataloger", "erlang/rebar.lock"],
+  "go": ["go-module-file-cataloger", "golang/go-sum-hashes"],
+  "haskell": ["haskell-cataloger", "haskell/cabal.project.freeze"],
+  "java": ["java-pom-cataloger", "java/pom/commons-text-1.10.0/pom.xml"],
+  "javascript": ["javascript-lock-cataloger", "javascript/yarn-berry-dups/yarn.lock"],
+  "lua": ["lua-rock-cataloger", "lua/rockspec/lpeg-1.0.2-1.rockspec"],
+  "nix": ["nix-cataloger", "nix/fixture-1"],
+  "ocaml": ["opam-cataloger", "ocaml/alcotest.opam"],
+  "perl": ["perl-cpan-meta-cataloger", "perl/identity-positive/META.json"],
+  "php": ["php-composer-lock-cataloger", "php/composer.lock"],
+  "prolog": ["swipl-pack-cataloger", "swipl/pack.pl"],
+  "python": ["python-package-cataloger", "python/pdm-lock/pdm.lock"],
+  "r": ["r-package-cataloger", "r/installed/stringr/DESCRIPTION"],
+  "ruby": ["ruby-gemfile-cataloger", "ruby/Gemfile.lock"],
+  "rust": ["rust-cargo-lock-cataloger", "rust/Cargo.lock"],
+  "swift": ["swift-package-manager-cataloger", "swift/PackageV3.resolved", "Package.resolved"]
+}
