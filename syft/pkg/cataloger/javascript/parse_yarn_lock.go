@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
-	"github.com/scylladb/go-set/strset"
 
 	"github.com/anchore/syft/internal"
 	"github.com/anchore/syft/internal/log"
@@ -181,7 +180,6 @@ func parseYarnV1LockFile(reader io.ReadCloser) ([]yarnPackage, error) {
 	lines := re.Split(string(content), -1)
 	var pkgs []yarnPackage
 	var pkg = yarnPackage{}
-	var seenPkgs = strset.New()
 	dependencies := make(map[string]string)
 
 	for _, line := range lines {
@@ -190,10 +188,9 @@ func parseYarnV1LockFile(reader io.ReadCloser) ([]yarnPackage, error) {
 		}
 		// Blank lines indicate the end of a package entry, so we add the package
 		// to the list and reset the dependencies
-		if len(line) == 0 && len(pkg.Name) > 0 && !seenPkgs.Has(pkg.Name+"@"+pkg.Version) {
+		if len(line) == 0 && len(pkg.Name) > 0 {
 			pkg.Dependencies = dependencies
 			pkgs = append(pkgs, pkg)
-			seenPkgs.Add(pkg.Name + "@" + pkg.Version)
 			dependencies = make(map[string]string)
 			pkg = yarnPackage{}
 			continue
@@ -221,12 +218,10 @@ func parseYarnV1LockFile(reader io.ReadCloser) ([]yarnPackage, error) {
 			dependencies[dependencyName] = dependencyVersion
 		}
 	}
-	// If the last package in the list is not the same as the current package, add the current package
-	// to the list. In case there was no trailing new line before we hit EOF.
-	if len(pkg.Name) > 0 && !seenPkgs.Has(pkg.Name+"@"+pkg.Version) {
+	// A lockfile can end without a trailing blank line.
+	if len(pkg.Name) > 0 {
 		pkg.Dependencies = dependencies
 		pkgs = append(pkgs, pkg)
-		seenPkgs.Add(pkg.Name + "@" + pkg.Version)
 	}
 
 	return pkgs, nil
