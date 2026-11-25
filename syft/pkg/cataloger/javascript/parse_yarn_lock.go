@@ -51,6 +51,7 @@ var (
 )
 
 type yarnPackage struct {
+	Descriptors  []string
 	Name         string
 	Version      string
 	Resolved     string
@@ -119,54 +120,58 @@ func readPackageJSONDeps(resolver file.Resolver, lockfileLocation file.Location)
 	return prod, dev
 }
 
-// findReachable returns all package names reachable from the given roots via BFS
-// through the dependency graph.
-func findReachable(roots map[string]string, pkgByName map[string]yarnPackage) map[string]bool {
-	visited := make(map[string]bool)
-	queue := make([]string, 0, len(roots))
+// Yarn lockfile keys describe requests. Several requests can select the same entry.
+type yarnLockGraph struct {
+	byDescriptor map[string]int
+	berry        bool
+}
 
-	for name := range roots {
-		queue = append(queue, name)
+func newYarnLockGraph(entries []yarnPackage, berry bool) yarnLockGraph {
+	graph := yarnLockGraph{byDescriptor: make(map[string]int), berry: berry}
+	for index, entry := range entries {
+		for _, descriptor := range entry.Descriptors {
+			graph.byDescriptor[descriptor] = index
+		}
 	}
+	return graph
+}
 
+func (g yarnLockGraph) lookup(name, request string) (int, bool) {
+	index, ok := g.byDescriptor[name+"@"+request]
+	if !ok && g.berry && !strings.Contains(request, ":") {
+		index, ok = g.byDescriptor[name+"@npm:"+request]
+	}
+	return index, ok
+}
+
+func (g yarnLockGraph) reachable(entries []yarnPackage, roots map[string]string) map[int]bool {
+	visited := make(map[int]bool)
+	var queue []int
+	add := func(name, request string) {
+		if index, ok := g.lookup(name, request); ok && !visited[index] {
+			visited[index] = true
+			queue = append(queue, index)
+		}
+	}
+	for name, request := range roots {
+		add(name, request)
+	}
 	for len(queue) > 0 {
-		name := queue[0]
+		index := queue[0]
 		queue = queue[1:]
-
-		if visited[name] {
-			continue
-		}
-		visited[name] = true
-
-		if pkg, exists := pkgByName[name]; exists {
-			for depName := range pkg.Dependencies {
-				if !visited[depName] {
-					queue = append(queue, depName)
-				}
-			}
+		for name, request := range entries[index].Dependencies {
+			add(name, request)
 		}
 	}
-
 	return visited
 }
 
-func findDevOnlyPkgs(yarnPkgs []yarnPackage, prodDeps, devDeps map[string]string) map[string]bool {
-	pkgByName := make(map[string]yarnPackage)
-	for _, p := range yarnPkgs {
-		pkgByName[p.Name] = p
+func yarnDescriptors(key string) []string {
+	descriptors := strings.Split(key, ", ")
+	for index, descriptor := range descriptors {
+		descriptors[index] = strings.Trim(descriptor, `"`)
 	}
-
-	prodTransitive := findReachable(prodDeps, pkgByName)
-	devTransitive := findReachable(devDeps, pkgByName)
-
-	devOnly := make(map[string]bool)
-	for name := range devTransitive {
-		if !prodTransitive[name] {
-			devOnly[name] = true
-		}
-	}
-
-	return devOnly
+	return descriptors
 }
 
 func parseYarnV1LockFile(reader io.ReadCloser) ([]yarnPackage, error) {
@@ -200,6 +205,7 @@ func parseYarnV1LockFile(reader io.ReadCloser) ([]yarnPackage, error) {
 		if !strings.HasPrefix(line, " ") {
 			name := line
 			pkg.Name = findPackageName(name)
+			pkg.Descriptors = yarnDescriptors(strings.TrimSuffix(name, ":"))
 			continue
 		}
 		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") {
@@ -268,6 +274,7 @@ func parseYarnLockYaml(reader io.ReadCloser) ([]yarnPackage, error) {
 
 		// Different resolutions of the same name and version have distinct package IDs.
 		pkgs = append(pkgs, yarnPackage{
+			Descriptors:  yarnDescriptors(key),
 			Name:         packageName,
 			Version:      value.Version,
 			Resolved:     value.Resolution,
@@ -297,7 +304,8 @@ func (a genericYarnLockAdapter) parseYarnLock(ctx context.Context, resolver file
 	var yarnPkgs []yarnPackage
 	// v1 Yarn lockfiles are not YAML, so we need to parse them as a special case. They typically
 	// include a comment line that indicates the version. I.e. "# yarn lockfile v1"
-	if strings.Contains(string(data), "# yarn lockfile v1") {
+	berry := !bytes.Contains(data, []byte("# yarn lockfile v1"))
+	if !berry {
 		yarnPkgs, err = parseYarnV1LockFile(reader)
 	} else {
 		yarnPkgs, err = parseYarnLockYaml(reader)
@@ -309,19 +317,55 @@ func (a genericYarnLockAdapter) parseYarnLock(ctx context.Context, resolver file
 	// get dependencies from sibling package.json for dev dependency detection
 	prodDeps, devDeps := readPackageJSONDeps(resolver, reader.Location)
 
-	devOnlyPkgs := findDevOnlyPkgs(yarnPkgs, prodDeps, devDeps)
+	graph := newYarnLockGraph(yarnPkgs, berry)
 
-	packages := make([]pkg.Package, 0, len(yarnPkgs))
-	for _, p := range yarnPkgs {
-		if devOnlyPkgs[p.Name] && !a.cfg.IncludeDevDependencies {
+	type resolution struct{ name, version, locator, integrity string }
+	identity := func(index int) resolution {
+		p := yarnPkgs[index]
+		return resolution{p.Name, p.Version, p.Resolved, p.Integrity}
+	}
+	devOnly := make(map[resolution]bool)
+	if !a.cfg.IncludeDevDependencies {
+		for index := range graph.reachable(yarnPkgs, devDeps) {
+			devOnly[identity(index)] = true
+		}
+		for index := range graph.reachable(yarnPkgs, prodDeps) {
+			delete(devOnly, identity(index))
+		}
+	}
+
+	var packages []pkg.Package
+	idsByEntry := make(map[int]artifact.ID)
+	requires := make(map[artifact.ID][]string)
+	for index, entry := range yarnPkgs {
+		if devOnly[identity(index)] {
 			continue
 		}
-		packages = append(packages, newYarnLockPackage(ctx, a.licenseResolver, resolver, reader.Location, p.Name, p.Version, p.Resolved, p.Integrity, p.Dependencies))
+		p := newYarnLockPackage(ctx, a.licenseResolver, resolver, reader.Location, entry.Name, entry.Version, entry.Resolved, entry.Integrity, entry.Dependencies)
+		idsByEntry[index] = p.ID()
+		if _, seen := requires[p.ID()]; !seen {
+			packages = append(packages, p)
+			requires[p.ID()] = nil
+		}
+	}
+	for index, id := range idsByEntry {
+		for name, request := range yarnPkgs[index].Dependencies {
+			if child, ok := graph.lookup(name, request); ok {
+				if childID, included := idsByEntry[child]; included {
+					requires[id] = append(requires[id], string(childID))
+				}
+			}
+		}
 	}
 
 	pkg.Sort(packages)
-
-	return packages, dependency.Resolve(yarnLockDependencySpecifier, packages), unknown.IfEmptyf(packages, "unable to determine packages")
+	relationships := dependency.Resolve(func(p pkg.Package) dependency.Specification {
+		return dependency.Specification{ProvidesRequires: dependency.ProvidesRequires{
+			Provides: []string{string(p.ID())},
+			Requires: requires[p.ID()],
+		}}
+	}, packages)
+	return packages, relationships, unknown.IfEmptyf(packages, "unable to determine packages")
 }
 
 func findPackageName(line string) string {
