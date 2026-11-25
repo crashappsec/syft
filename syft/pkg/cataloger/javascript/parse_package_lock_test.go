@@ -1,8 +1,16 @@
 package javascript
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/anchore/syft/syft/artifact"
 	"github.com/anchore/syft/syft/file"
@@ -481,4 +489,62 @@ func Test_corruptPackageLock(t *testing.T) {
 		FromFile(t, "testdata/corrupt/package-lock.json").
 		WithError().
 		TestParser(t, gap.parsePackageLock)
+}
+
+func TestPackageLockLinksParentsToInstalledCopies(t *testing.T) {
+	content, err := os.ReadFile("testdata/pkg-lock/identity-package-lock-3.json")
+	require.NoError(t, err)
+
+	var control packageLock
+	require.NoError(t, json.Unmarshal(content, &control))
+	delete(control.Packages, "node_modules/second-parent/node_modules/identity-leaf")
+	control.Packages["node_modules/second-parent"].Dependencies["identity-leaf"] =
+		control.Packages["node_modules/identity-leaf"].Resolved
+
+	controlContent, err := json.Marshal(control)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name   string
+		input  []byte
+		leaves int
+		edges  map[string][]string
+	}{
+		{"distinct copies", content, 2, map[string][]string{
+			"first-parent":  {"https://example.invalid/first-leaf.tgz"},
+			"second-parent": {"https://example.invalid/second-leaf.tgz"},
+		}},
+		{"shared copy", controlContent, 1, map[string][]string{
+			"first-parent":  {"https://example.invalid/first-leaf.tgz"},
+			"second-parent": {"https://example.invalid/first-leaf.tgz"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := file.LocationReadCloser{
+				Location:   file.NewLocation("package-lock.json"),
+				ReadCloser: io.NopCloser(bytes.NewReader(tc.input)),
+			}
+			adapter := newGenericPackageLockAdapter(CatalogerConfig{})
+			packages, relationships, err := adapter.parsePackageLock(t.Context(), nil, nil, reader)
+			require.NoError(t, err)
+
+			ids := make(map[artifact.ID]bool)
+			for _, p := range packages {
+				if p.Name == "identity-leaf" {
+					assert.Equal(t, "pkg:npm/identity-leaf@1.0.0", p.PURL)
+					ids[p.ID()] = true
+				}
+			}
+			assert.Len(t, ids, tc.leaves)
+			edges := make(map[string][]string)
+			for _, rel := range relationships {
+				child := rel.From.(pkg.Package)
+				parent := rel.To.(pkg.Package)
+				if child.Name == "identity-leaf" && strings.HasSuffix(parent.Name, "-parent") {
+					edges[parent.Name] = append(edges[parent.Name], child.Metadata.(pkg.NpmPackageLockEntry).Resolved)
+				}
+			}
+			assert.Equal(t, tc.edges, edges)
+		})
+	}
 }

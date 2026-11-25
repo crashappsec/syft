@@ -1,0 +1,42 @@
+{
+  "name": "identity-fixture",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "identity-fixture",
+      "version": "1.0.0",
+      "dependencies": {
+        "first-parent": "https://example.invalid/first-parent.tgz",
+        "second-parent": "https://example.invalid/second-parent.tgz"
+      }
+    },
+    "node_modules/first-parent": {
+      "version": "1.0.0",
+      "resolved": "https://example.invalid/first-parent.tgz",
+      "integrity": "sha512-Xjb3uh0OTC8ArwYYRNHB9fSWENdVR7Ewf0s5NLUEE1a6HfN3qwcIA/t4+rpRgePpqd9adHWr7cbA4gBrpINcQg==",
+      "dependencies": {
+        "identity-leaf": "https://example.invalid/first-leaf.tgz"
+      }
+    },
+    "node_modules/identity-leaf": {
+      "version": "1.0.0",
+      "resolved": "https://example.invalid/first-leaf.tgz",
+      "integrity": "sha512-U/5cILb1zP20O+khJE0vumIDh3E2YzcdgPfy6RveFsTuPH13Q828v8HG/rN2j31sT2gsEq9W98Fvp6qJTZIC8w=="
+    },
+    "node_modules/second-parent": {
+      "version": "1.0.0",
+      "resolved": "https://example.invalid/second-parent.tgz",
+      "integrity": "sha512-f2Z8zQfHm564liMSfsgxGD5oAUkvHjmjIdPncYiFF0LsQI0+DU9JpmxpemV/EKZZazgbiUZNLYIsVSq2ItQMeA==",
+      "dependencies": {
+        "identity-leaf": "https://example.invalid/second-leaf.tgz"
+      }
+    },
+    "node_modules/second-parent/node_modules/identity-leaf": {
+      "version": "1.0.0",
+      "resolved": "https://example.invalid/second-leaf.tgz",
+      "integrity": "sha512-Jj5vXhLEMsYyvjOZqcN8mmGtkMW6E3zLoos4JoG0+csxr0pwVHZHkiXEHYw5//g5fJr2C6nQtdS2jF1sglBH4g=="
+    }
+  }
+}
